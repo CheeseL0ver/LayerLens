@@ -163,6 +163,7 @@ struct LayerLensApp: App {
         // window dimensions; we don't want it resizable.
         Window("About LayerLens", id: "about") {
             AboutView()
+                .environment(appDelegate.preferences)
         }
         .windowResizability(.contentSize)
         .defaultLaunchBehavior(.suppressed)

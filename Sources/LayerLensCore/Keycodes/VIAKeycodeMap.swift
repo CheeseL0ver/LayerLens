@@ -92,4 +92,19 @@ public struct VIAKeycodeMap: Sendable {
     public static let v10 = VIAKeycodeMap(basicTable: v10BasicTable, ranges: v10Ranges)
     public static let v11 = VIAKeycodeMap(basicTable: v11BasicTable, ranges: v11Ranges)
     public static let v12 = VIAKeycodeMap(basicTable: v12BasicTable, ranges: v12Ranges)
+
+    /// Look up a QMK keycode by its symbolic name (e.g. `"KC_LCTL"` → `0x00E0`).
+    /// Case-insensitive. If the input has no `KC_`/`QK_`/`RGB_`/etc. prefix,
+    /// `KC_` is implied — so `"A"` resolves to `0x0004` just like `"KC_A"`.
+    /// Returns nil for unknown names. Power-user input field on the Custom
+    /// tab uses this; the bulk of users will never see it.
+    public static func keycode(forName raw: String) -> UInt16? {
+        var key = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !key.isEmpty else { return nil }
+        let knownPrefixes = ["KC_", "QK_", "RGB_", "BL_", "MAGIC_", "MU_", "DYN_"]
+        if !knownPrefixes.contains(where: { key.hasPrefix($0) }) {
+            key = "KC_" + key
+        }
+        return nameTable[key]
+    }
 }

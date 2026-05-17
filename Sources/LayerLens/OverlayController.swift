@@ -32,10 +32,10 @@ final class OverlayController {
     private weak var preferences: Preferences?
     private var fadeOutTask: Task<Void, Never>?
     private var isPinned: Bool = false
-    /// Set while `applyPlacement()` is calling `setFrameOrigin`, so the
-    /// `windowDidMove` delegate doesn't mistake our own programmatic move
-    /// for a user drag and flip placement back to `.custom`.
-    private var isApplyingPlacement: Bool = false
+    /// Set while `applyPlacement()` is moving the preview panel, so the
+    /// preview's `windowDidMove` delegate doesn't treat our own programmatic
+    /// move (e.g. switching presets, content resize) as a user drag.
+    private var isApplyingPreviewPlacement: Bool = false
     /// Token for the screen-parameters observer. Held so we can deregister
     /// in deinit / on app termination if needed (currently the controller
     /// lives for the app's lifetime, so this is mostly belt-and-braces).
@@ -123,6 +123,7 @@ final class OverlayController {
         guard let preferences else { return }
         withObservationTracking {
             _ = preferences.overlayPlacement
+            _ = preferences.overlayCustomOrigin
             _ = preferences.overlayScale
             _ = preferences.overlayOpacity
             _ = preferences.labelFontSize
@@ -139,7 +140,9 @@ final class OverlayController {
                 if let preview = self.previewPanel {
                     // Preview tracks every overlay-shaping pref so the user sees
                     // their changes in real time. SwiftUI inside it will rebuild
-                    // automatically; we just need to re-position the panel.
+                    // automatically; we just need to re-position the panel and
+                    // refresh its drag-interactivity (Custom ↔ preset toggles).
+                    self.updatePreviewInteractivity()
                     self.applyPlacement(to: preview)
                 }
                 self.observePlacementChanges()  // re-register
@@ -240,6 +243,7 @@ final class OverlayController {
     func showPreview() {
         guard let preferences else { return }
         if let panel = previewPanel {
+            updatePreviewInteractivity()
             applyPlacement(to: panel)
             panel.orderFrontRegardless()
             return
@@ -272,11 +276,28 @@ final class OverlayController {
         panel.isFloatingPanel = false
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = true
-        panel.ignoresMouseEvents = true   // preview is non-interactive
         panel.contentView = host
         panel.alphaValue = 1.0
         panel.isReleasedWhenClosed = false
+
+        let delegate = OverlayWindowDelegate(
+            onClose: { [weak self] in self?.previewPanel = nil },
+            onMove: { [weak self] origin in
+                // Only honour user drags while placement is .custom; otherwise
+                // a content-driven resize that nudges the origin would silently
+                // overwrite the saved point.
+                guard let self,
+                      !self.isApplyingPreviewPlacement,
+                      let prefs = self.preferences,
+                      prefs.overlayPlacement == .custom else { return }
+                prefs.overlayCustomOrigin = origin
+            }
+        )
+        panel.delegate = delegate
+        previewDelegate = delegate
+
         previewPanel = panel
+        updatePreviewInteractivity()
         applyPlacement(to: panel)
         panel.orderFrontRegardless()
     }
@@ -285,7 +306,20 @@ final class OverlayController {
         guard let panel = previewPanel else { return }
         panel.contentView = NSView(frame: .zero)
         panel.orderOut(nil)
+        panel.delegate = nil
+        previewDelegate = nil
         previewPanel = nil
+    }
+
+    /// Toggle the preview panel's mouse interactivity based on the current
+    /// placement. In `.custom` the preview is the drag handle the user uses
+    /// to position the live overlay; in any preset placement it's a passive
+    /// visualisation that shouldn't capture clicks.
+    private func updatePreviewInteractivity() {
+        guard let panel = previewPanel, let preferences else { return }
+        let interactive = preferences.overlayPlacement == .custom
+        panel.ignoresMouseEvents = !interactive
+        panel.isMovableByWindowBackground = interactive
     }
 
     /// Flash the overlay in for a layerlens_notify event. No-op while pinned
@@ -360,19 +394,19 @@ final class OverlayController {
             backing: .buffered,
             defer: false
         )
-        // HUD-style transparent overlay: no chrome, no opaque background, drag
-        // the panel by clicking anywhere on it. The shadow stays so keys read
-        // even on a busy wallpaper.
+        // HUD-style transparent overlay: no chrome, no opaque background. The
+        // shadow stays so keys read even on a busy wallpaper. Mouse events
+        // pass straight through so games (e.g. Minecraft) keep their cursor
+        // capture and keyboard focus when the panel flashes over them.
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
-        panel.isMovableByWindowBackground = true
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = true
-        panel.ignoresMouseEvents = false
+        panel.ignoresMouseEvents = true
         panel.contentView = host
         panel.alphaValue = initialAlpha
         // Force the SwiftUI hosting view to lay out *now* so its fittingSize
@@ -391,17 +425,6 @@ final class OverlayController {
                 self?.isPinned = false
                 self?.preferences?.overlayVisible = false
                 self?.panel = nil
-            },
-            onMove: { [weak self] origin in
-                // User dragged the overlay → switch to custom placement and
-                // remember exactly where it landed. Ignore moves that came
-                // from our own applyPlacement() so presets actually stick.
-                guard let self, !self.isApplyingPlacement,
-                      let prefs = self.preferences else { return }
-                prefs.overlayCustomOrigin = origin
-                if prefs.overlayPlacement != .custom {
-                    prefs.overlayPlacement = .custom
-                }
             }
         )
         panel.delegate = delegate
@@ -416,8 +439,9 @@ final class OverlayController {
     private func applyPlacement(to panel: NSPanel) {
         guard let preferences else { return }
 
-        isApplyingPlacement = true
-        defer { isApplyingPlacement = false }
+        let isPreview = (panel === previewPanel)
+        if isPreview { isApplyingPreviewPlacement = true }
+        defer { if isPreview { isApplyingPreviewPlacement = false } }
 
         // Size to content first so placement can use the right dimensions.
         if let host = panel.contentView as? NSHostingView<OverlayView> {
@@ -520,45 +544,45 @@ final class OverlayController {
 
     // Strong reference to keep delegate alive as long as the panel.
     private var delegate: OverlayWindowDelegate?
+    /// Strong reference for the preview panel's delegate; lives as long as
+    /// the preview panel does.
+    private var previewDelegate: OverlayWindowDelegate?
 }
 
 @MainActor
 private final class OverlayWindowDelegate: NSObject, NSWindowDelegate {
     private let onClose: @MainActor () -> Void
-    private let onMove: @MainActor (CGPoint) -> Void
+    /// Optional: only the preview panel uses this (to record user drags
+    /// when placement is `.custom`). The live overlay is click-through and
+    /// never moves under the user, so its delegate omits this hook.
+    private let onMove: (@MainActor (CGPoint) -> Void)?
 
     init(
         onClose: @escaping @MainActor () -> Void,
-        onMove:  @escaping @MainActor (CGPoint) -> Void
+        onMove: (@MainActor (CGPoint) -> Void)? = nil
     ) {
         self.onClose = onClose
         self.onMove = onMove
     }
 
-    // NSWindow delegate methods are dispatched on the main thread; assert the
-    // isolation synchronously so the callback runs before AppKit returns control
-    // to the caller of setFrameOrigin (otherwise our isApplyingPlacement flag
-    // would already be reset by the time the handler fires).
     nonisolated func windowWillClose(_ notification: Notification) {
         MainActor.assumeIsolated { self.onClose() }
     }
 
+    // AppKit fires NSWindowDelegate callbacks synchronously on the main
+    // thread; the handler must also run synchronously so it observes the
+    // controller's `isApplyingPreviewPlacement == true` while applyPlacement
+    // is still inside `setFrameOrigin` (otherwise our own programmatic moves
+    // get misinterpreted as user drags). `MainActor.assumeIsolated` runs
+    // synchronously; the unchecked Sendable wrapper carries the non-Sendable
+    // NSWindow reference past strict-concurrency, safe under AppKit's
+    // documented main-thread dispatch contract.
     nonisolated func windowDidMove(_ notification: Notification) {
-        // AppKit fires NSWindowDelegate callbacks synchronously on the main
-        // thread; the handler must also run synchronously so it observes
-        // `isApplyingPlacement == true` while applyPlacement is still in
-        // setFrameOrigin (otherwise our own programmatic moves get
-        // misinterpreted as user drags and flip placement to .custom).
-        //
-        // `MainActor.assumeIsolated` runs synchronously on the current
-        // thread; the unchecked Sendable wrapper lets the closure capture
-        // the non-Sendable NSWindow reference without tripping strict-
-        // concurrency, which is safe given AppKit's documented main-thread
-        // dispatch contract.
+        guard let onMove else { return }
         let object = UncheckedSendable(notification.object)
         MainActor.assumeIsolated {
             guard let window = object.value as? NSWindow else { return }
-            self.onMove(window.frame.origin)
+            onMove(window.frame.origin)
         }
     }
 }
