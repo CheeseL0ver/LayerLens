@@ -17,6 +17,18 @@
                 type="application/octet-stream"
                 sparkle:edSignature="Qz2PkTeE7GFSUcwrBTTfH8MaheGE1MH3CdNfZbOd4ngngf9BeB9yc252s7VQOAyTB6vYMNONEOaDfp20BOkYDA==" />
         </item>
+                <item>
+            <title>Version 0.5.0</title>
+            <pubDate>Sun, 17 May 2026 17:11:53 +0000</pubDate>
+            <sparkle:version>0.5.0</sparkle:version>
+            <sparkle:shortVersionString>0.5.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure
+                url="https://github.com/FireBall1725/LayerLens/releases/download/v0.5.0/LayerLens-0.5.0.dmg"
+                length="2773812"
+                type="application/octet-stream"
+                sparkle:edSignature="uVv+HB58WDku5Lp4QPa6yk8Q3jQw6ZAAPV/UrTlD10I5N76nyfN0vMBbeLAlVoeSIsUKxuZH2J92xjNq2ZykCw==" />
+        </item>
         <!-- The release workflow inserts new <item> entries above this comment. -->
     </channel>
 </rss>
