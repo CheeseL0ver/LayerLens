@@ -118,6 +118,41 @@ struct VIAClientTests {
         #expect(bufferRequests.count == 3)
     }
 
+    @Test("setKeycode encodes layer/row/col/keycode and decodes echoed keycode")
+    func setKeycode() async throws {
+        let mock = MockHIDTransport()
+        mock.responder = { req in
+            #expect(req[0] == 0x05)
+            #expect(req[1] == 0x02)        // layer 2
+            #expect(req[2] == 0x03)        // row 3
+            #expect(req[3] == 0x05)        // col 5
+            #expect(req[4] == 0x40)        // kc_hi
+            #expect(req[5] == 0x12)        // kc_lo  → 0x4012
+            var r = Data(count: 32)
+            r[0] = 0x05
+            r[1] = 0x02
+            r[2] = 0x03
+            r[3] = 0x05
+            r[4] = 0x40
+            r[5] = 0x12
+            return r
+        }
+        let client = VIAClient(transport: mock)
+        let echoed = try await client.setKeycode(layer: 2, row: 3, col: 5, keycode: 0x4012)
+        #expect(echoed == 0x4012)
+    }
+
+    @Test("setKeycode rejects out-of-range coordinates")
+    func setKeycodeOutOfRange() async throws {
+        let mock = MockHIDTransport()
+        let client = VIAClient(transport: mock)
+        await #expect(throws: VIAError.self) {
+            try await client.setKeycode(layer: 256, row: 0, col: 0, keycode: 0)
+        }
+        // Should not have hit the transport at all when validation fails.
+        #expect(mock.sent.isEmpty)
+    }
+
     @Test("stray non-matching reports are skipped")
     func straysIgnored() async throws {
         let mock = MockHIDTransport()

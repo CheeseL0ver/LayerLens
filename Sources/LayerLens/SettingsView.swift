@@ -6,7 +6,7 @@ import LayerLensCore
 /// reset to `.general` every time the Settings window appears, so users
 /// don't get dropped back into whichever tab they had open last week.
 private enum SettingsTab: String, Hashable {
-    case general, overlay, display, theme, privacy, logs
+    case general, overlay, display, theme, privacy, logs, dev
 }
 
 struct SettingsView: View {
@@ -40,6 +40,11 @@ struct SettingsView: View {
             LogsTabView()
                 .tabItem { Label("Logs", systemImage: "doc.text.magnifyingglass") }
                 .tag(SettingsTab.logs)
+            if preferences.devToolsEnabled {
+                devTab
+                    .tabItem { Label("Dev", systemImage: "hammer") }
+                    .tag(SettingsTab.dev)
+            }
         }
         // .min/.ideal pair so the window opens at a comfortable size but
         // grows with Dynamic Type / user resize. The Settings scene's
@@ -55,6 +60,12 @@ struct SettingsView: View {
         .onAppear { selectedTab = .general; updatePreview() }
         .onDisappear { overlay.hidePreview() }
         .onChange(of: selectedTab) { _, _ in updatePreview() }
+        .onChange(of: preferences.devToolsEnabled) { _, enabled in
+            // Dev tab vanishes when the user disables dev tools from inside
+            // it; without this the tab strip is left with the (now stale)
+            // .dev selection and a blank pane.
+            if !enabled && selectedTab == .dev { selectedTab = .general }
+        }
     }
 
     /// Show the live demo overlay only on tabs that affect overlay rendering.
@@ -62,7 +73,7 @@ struct SettingsView: View {
         switch selectedTab {
         case .overlay, .display, .theme:
             overlay.showPreview()
-        case .general, .logs, .privacy:
+        case .general, .logs, .privacy, .dev:
             overlay.hidePreview()
         }
     }
@@ -258,7 +269,7 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.menu)
 
-                Text("Drag the overlay to move it anywhere; placement automatically switches to “Custom.”")
+                Text("Pick “Custom” and drag the preview to put the overlay exactly where you want it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -402,6 +413,50 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// Hidden Dev tab. Only present when the user has unlocked dev tools via
+    /// the About-window easter egg. Holds the feature-flag toggles and a
+    /// self-service "Disable Dev tools" exit so the user can re-hide the tab
+    /// without resorting to UserDefaults surgery.
+    private var devTab: some View {
+        Form {
+            Section("Feature flags") {
+                if FeatureFlag.allCases.isEmpty {
+                    Text("No feature flags right now.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(FeatureFlag.allCases) { flag in
+                        featureFlagRow(flag)
+                    }
+                }
+            }
+
+            Section("Dev tools") {
+                Toggle("Dev tools enabled", isOn: Binding(
+                    get: { preferences.devToolsEnabled },
+                    set: { preferences.devToolsEnabled = $0 }
+                ))
+                Text("Turning this off hides the Dev tab. Your feature-flag selections are remembered, so re-unlocking restores them.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func featureFlagRow(_ flag: FeatureFlag) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(flag.title, isOn: Binding(
+                get: { preferences.isFeatureEnabled(flag) },
+                set: { preferences.setFeatureEnabled(flag, $0) }
+            ))
+            Text(flag.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     /// Compact paragraph row for the Privacy tab. Mirrors the onboarding

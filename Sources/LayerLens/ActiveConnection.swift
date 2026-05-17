@@ -3,6 +3,14 @@ import SwiftUI
 import AppKit
 import LayerLensCore
 
+/// Position of a key in the firmware's switch matrix. Used as the
+/// identity of the currently-edited key in the Configure window's
+/// Keymap tab. Hashable so SwiftUI can drive selection/animation on it.
+struct KeyMatrix: Hashable, Sendable {
+    let row: Int
+    let col: Int
+}
+
 /// One live connection to a Raw HID keyboard. Owns the HIDDevice + VIAClient
 /// and the read keymap/layer state. AppState holds a dictionary of these,
 /// keyed by IOKit registry path.
@@ -20,6 +28,18 @@ final class ActiveConnection: Identifiable {
     var layoutSource: LayoutSource?
     var keymap: [[[UInt16]]] = []
     var selectedLayer: Int = 0
+    /// The key currently being edited in the Configure window's Keymap
+    /// tab. `nil` collapses the keycode picker panel. Lives on the
+    /// connection (not view @State) so it survives tab switches.
+    var selectedKey: KeyMatrix?
+    /// Most recent firmware-write failure message. The Configure window
+    /// surfaces this as a toast at the bottom of the picker, then a
+    /// short auto-dismiss task clears it back to nil.
+    var writeError: String?
+    /// Last keycodes the user assigned, newest first. Drives the "Recent"
+    /// row at the top of the picker. Capped at 12 entries; reset is keyed
+    /// per-connection (so each board gets its own recents).
+    var recentKeycodes: [UInt16] = []
     var activeLayerMask: UInt32 = 0
     var hasLiveLayerEvents: Bool = false
     var error: String?
@@ -97,6 +117,88 @@ final class ActiveConnection: Identifiable {
             vendorID: keyboard.info.vendorID,
             productID: keyboard.info.productID
         )
+    }
+
+    /// Write a single keycode at `(layer, row, col)` in the live keymap.
+    /// Optimistically updates the observed `keymap` array (so the UI flips
+    /// immediately), then issues VIA's dynamic_keymap_set_keycode (0x05).
+    /// On firmware error/timeout, reverts the local change and surfaces
+    /// the failure via `writeError` (auto-dismissed) before rethrowing.
+    func setKeycode(layer: Int, row: Int, col: Int, keycode: UInt16) async throws {
+        guard layer >= 0, layer < keymap.count,
+              row >= 0, row < keymap[layer].count,
+              col >= 0, col < keymap[layer][row].count
+        else {
+            throw VIAError.invalidArgument(
+                "(\(layer), \(row), \(col)) out of bounds for keymap \(keymap.count)L × \(keymap.first?.count ?? 0)R × \(keymap.first?.first?.count ?? 0)C"
+            )
+        }
+        let previous = keymap[layer][row][col]
+        keymap[layer][row][col] = keycode
+        do {
+            _ = try await client.setKeycode(layer: layer, row: row, col: col, keycode: keycode)
+            pushRecent(keycode)
+        } catch {
+            keymap[layer][row][col] = previous
+            Log.error(
+                "[setKeycode] revert (\(layer),\(row),\(col)) "
+                + String(format: "0x%04X→0x%04X", keycode, previous)
+                + ": \(error)"
+            )
+            await flashWriteError(
+                "Couldn't write " + String(format: "0x%04X", keycode)
+                + " — \(error.localizedDescription)"
+            )
+            throw error
+        }
+    }
+
+    /// Issue VIA's `dynamic_keymap_reset` (0x06) and re-fetch the keymap
+    /// so the local view matches firmware-default state. Destructive; the
+    /// caller is expected to have confirmed with the user.
+    func resetKeymap() async throws {
+        guard let definition else {
+            throw VIAError.invalidArgument("Cannot reset keymap: no layout loaded yet.")
+        }
+        do {
+            try await client.resetKeymap()
+            let layers = try await client.layerCount()
+            let fresh = try await client.readKeymap(
+                layers: Int(layers),
+                rows: definition.rows,
+                cols: definition.cols
+            )
+            keymap = fresh
+            selectedKey = nil
+            recentKeycodes.removeAll()
+        } catch {
+            Log.error("[resetKeymap] failed: \(error)")
+            await flashWriteError("Couldn't reset keymap — \(error.localizedDescription)")
+            throw error
+        }
+    }
+
+    /// Push a freshly-assigned keycode onto the recents list. De-duplicates
+    /// (existing entries move to the front) and caps at 12 entries.
+    private func pushRecent(_ kc: UInt16) {
+        // KC_NO and KC_TRNS are common but not interesting to suggest.
+        guard kc != 0x0000, kc != 0x0001 else { return }
+        recentKeycodes.removeAll { $0 == kc }
+        recentKeycodes.insert(kc, at: 0)
+        if recentKeycodes.count > 12 { recentKeycodes.removeLast(recentKeycodes.count - 12) }
+    }
+
+    /// Show a transient error toast in the Configure window picker. Each
+    /// flash supersedes any previous one; auto-clears after 4 seconds.
+    private var writeErrorClearTask: Task<Void, Never>?
+    private func flashWriteError(_ message: String) async {
+        writeError = message
+        writeErrorClearTask?.cancel()
+        writeErrorClearTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            await MainActor.run { self?.writeError = nil }
+        }
     }
 
     /// Start mirroring the device's active layers. The firmware module

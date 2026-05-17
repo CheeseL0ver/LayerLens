@@ -4,6 +4,40 @@ import CoreGraphics
 import SwiftUI
 import LayerLensCore
 
+/// A single named feature toggle. Each case carries its own metadata so the
+/// Dev tab in Settings can render a self-describing toggle without having to
+/// repeat strings in the view layer. Add new flags by adding a case here;
+/// `Preferences` will pick them up automatically via `CaseIterable`.
+public enum FeatureFlag: String, CaseIterable, Identifiable, Sendable {
+    /// Click-to-change keycode picker in the Configure window's Keymap tab.
+    /// Off keeps the keymap viewer read-only.
+    case keycodeChanger
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .keycodeChanger: return "Keycode changer"
+        }
+    }
+
+    public var summary: String {
+        switch self {
+        case .keycodeChanger:
+            return "Click any key in the Configure window's Keymap tab to remap it. Writes through to the keyboard's firmware over VIA."
+        }
+    }
+
+    /// Default state before the user has flipped it in the Dev tab. New
+    /// experimental work should default to `false` so production users keep
+    /// the existing behaviour until they opt in.
+    public var defaultValue: Bool {
+        switch self {
+        case .keycodeChanger: return false
+        }
+    }
+}
+
 /// Where on the active screen the overlay panel sits. `.custom` means "wherever
 /// the user dragged it to" and pulls coordinates from `Preferences.overlayCustomX/Y`.
 public enum OverlayPlacement: String, Sendable, CaseIterable, Identifiable {
@@ -57,6 +91,8 @@ final class Preferences {
     private static let logLevelKey           = "logLevel"
     private static let telemetryEnabledKey   = "telemetryEnabled"
     private static let telemetryDecidedKey   = "telemetryDecided"
+    private static let devToolsEnabledKey    = "devToolsEnabled"
+    private static let featureFlagValuesKey  = "featureFlagValues"
 
     /// Connect to the first detected keyboard automatically when the app starts.
     var autoConnectOnLaunch: Bool {
@@ -161,6 +197,40 @@ final class Preferences {
     /// and No-thanks set this to true.
     var telemetryDecided: Bool {
         didSet { defaults.set(telemetryDecided, forKey: Self.telemetryDecidedKey) }
+    }
+
+    /// Whether the hidden "Dev tools" surface is unlocked. Flipped on by
+    /// tapping the version label in the About window five times, and can be
+    /// flipped off again from the Dev tab itself. When false the Dev tab is
+    /// not added to Settings, but feature-flag values stay persisted so a
+    /// later re-unlock restores the user's choices.
+    var devToolsEnabled: Bool {
+        didSet { defaults.set(devToolsEnabled, forKey: Self.devToolsEnabledKey) }
+    }
+
+    /// Per-flag on/off values keyed by `FeatureFlag.rawValue`. Missing keys
+    /// fall back to the flag's `defaultValue`. Read/written through
+    /// `isFeatureEnabled(_:)` / `setFeatureEnabled(_:_:)`.
+    var featureFlagValues: [String: Bool] {
+        didSet {
+            if let data = try? JSONEncoder().encode(featureFlagValues) {
+                defaults.set(data, forKey: Self.featureFlagValuesKey)
+            }
+        }
+    }
+
+    func isFeatureEnabled(_ flag: FeatureFlag) -> Bool {
+        featureFlagValues[flag.rawValue] ?? flag.defaultValue
+    }
+
+    func setFeatureEnabled(_ flag: FeatureFlag, _ enabled: Bool) {
+        if enabled == flag.defaultValue {
+            // Drop the override so the flag follows future default changes
+            // and the dict doesn't accumulate values that match the default.
+            featureFlagValues.removeValue(forKey: flag.rawValue)
+        } else {
+            featureFlagValues[flag.rawValue] = enabled
+        }
     }
 
     /// User-overridden layout JSON files keyed by `"VVVV:PPPP"`. When a
@@ -326,6 +396,16 @@ final class Preferences {
         // gates the onboarding question so we don't re-ask on every launch.
         self.telemetryEnabled = defaults.bool(forKey: Self.telemetryEnabledKey)
         self.telemetryDecided = defaults.bool(forKey: Self.telemetryDecidedKey)
+
+        // Dev-tools surface stays locked until the user triggers the About
+        // easter egg. Feature-flag overrides survive locking and unlocking.
+        self.devToolsEnabled = defaults.bool(forKey: Self.devToolsEnabledKey)
+        if let data = defaults.data(forKey: Self.featureFlagValuesKey),
+           let dict = try? JSONDecoder().decode([String: Bool].self, from: data) {
+            self.featureFlagValues = dict
+        } else {
+            self.featureFlagValues = [:]
+        }
 
         if let data = defaults.data(forKey: Self.customLayoutPathsKey),
            let dict = try? JSONDecoder().decode([String: String].self, from: data) {

@@ -315,6 +315,46 @@ public actor VIAClient {
         return Array(r[header ..< header + Int(length)])
     }
 
+    /// Reset every layer's keymap to the firmware's compile-time defaults.
+    /// Issues VIA's `dynamic_keymap_reset` (0x06). No payload, no useful
+    /// echoed data; callers should re-read the keymap afterwards.
+    public func resetKeymap() async throws {
+        _ = try await send(command: .dynamicKeymapReset)
+    }
+
+    /// Write a single keycode at `(layer, row, col)`. Issues VIA's
+    /// `dynamic_keymap_set_keycode` (0x05) and returns the keycode the
+    /// firmware echoes back — should equal the input on success. Caller
+    /// is responsible for refreshing local state (or doing it optimistically
+    /// before calling, since per-key writes are usually fast).
+    @discardableResult
+    public func setKeycode(layer: Int, row: Int, col: Int, keycode: UInt16) async throws -> UInt16 {
+        guard layer >= 0, layer <= 0xFF,
+              row >= 0, row <= 0xFF,
+              col >= 0, col <= 0xFF
+        else {
+            throw VIAError.invalidArgument("layer/row/col out of range: (\(layer), \(row), \(col))")
+        }
+        let payload: [UInt8] = [
+            UInt8(layer),
+            UInt8(row),
+            UInt8(col),
+            UInt8((keycode >> 8) & 0xFF),
+            UInt8(keycode & 0xFF),
+        ]
+        let r = try await send(command: .dynamicKeymapSetKeycode, payload: payload)
+        // Response echoes [0x05, layer, row, col, kc_hi, kc_lo].
+        let header = 4
+        guard r.count >= header + 2 else {
+            throw VIAError.shortResponse(
+                command: VIACommand.dynamicKeymapSetKeycode.rawValue,
+                expectedAtLeast: header + 2,
+                got: r.count
+            )
+        }
+        return (UInt16(r[header]) << 8) | UInt16(r[header + 1])
+    }
+
     /// Read every layer's keymap at once.
     /// Returns `[layer][row][col]` of raw QMK keycodes (UInt16, big-endian on the wire).
     public func readKeymap(layers: Int, rows: Int, cols: Int) async throws -> [[[UInt16]]] {

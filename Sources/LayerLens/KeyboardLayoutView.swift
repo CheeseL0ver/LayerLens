@@ -49,6 +49,14 @@ struct KeyboardLayoutView: View {
     /// in the visible layer has a keycode in this set, it lights up. Pass
     /// an empty set (default) to disable the live highlight.
     var pressedKeycodes: Set<UInt16> = []
+    /// Matrix coordinate of the currently-selected key, drawn with an
+    /// accent ring. The Configure window's Keymap tab drives this; the
+    /// overlay always passes `nil`.
+    var selectedKey: KeyMatrix? = nil
+    /// Called when the user clicks a key in `interactive` mode. The
+    /// Configure window uses this to set / toggle `selectedKey` on the
+    /// connection. Nil disables tap handling entirely.
+    var onKeyTap: ((KeyMatrix) -> Void)? = nil
 
     var body: some View {
         let bounds = computeBounds()
@@ -65,7 +73,11 @@ struct KeyboardLayoutView: View {
                     forceShowMatrixCoords: forceShowMatrixCoords,
                     useOverlayFont: useOverlayFont,
                     useOverlayTheme: useOverlayTheme,
-                    isPressed: isPressed(key)
+                    isPressed: isPressed(key),
+                    isSelected: isSelected(key),
+                    onTap: onKeyTap.map { handler in
+                        { handler(KeyMatrix(row: key.row, col: key.col)) }
+                    }
                 )
                 .frame(
                     width: max(1, key.w * scale - 4),
@@ -79,6 +91,11 @@ struct KeyboardLayoutView: View {
             }
         }
         .frame(width: width, height: height, alignment: .topLeading)
+    }
+
+    private func isSelected(_ key: LayoutKey) -> Bool {
+        guard let sel = selectedKey else { return false }
+        return sel.row == key.row && sel.col == key.col
     }
 
     /// True when this key's layer keycode is in the live pressed-keys set.
@@ -156,6 +173,9 @@ private struct KeyView: View {
     let useOverlayFont: Bool
     let useOverlayTheme: Bool
     let isPressed: Bool
+    let isSelected: Bool
+    /// Click handler in `interactive` mode. Nil disables tap handling.
+    let onTap: (() -> Void)?
 
     @State private var renameSheetActive: Bool = false
     @State private var renameDraft: String = ""
@@ -176,19 +196,12 @@ private struct KeyView: View {
                 .fill(fillStyle)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(
-                            isPressed
-                                ? AnyShapeStyle(Color.accentColor)
-                                : AnyShapeStyle(Color.primary.opacity(isPlaceholderKey ? 0.18 : 0.10)),
-                            lineWidth: isPressed ? 2 : 1
-                        )
+                        .stroke(strokeStyle, lineWidth: strokeWidth)
                 )
-                .shadow(
-                    color: isPressed ? .accentColor.opacity(0.55) : .clear,
-                    radius: isPressed ? 5 : 0
-                )
+                .shadow(color: glowColor, radius: glowRadius)
                 .scaleEffect(isPressed ? 1.04 : 1.0)
                 .animation(.easeOut(duration: 0.08), value: isPressed)
+                .animation(.easeOut(duration: 0.12), value: isSelected)
 
             VStack(alignment: .leading, spacing: 1) {
                 // Configure window stays on system 11pt; the overlay honors
@@ -214,6 +227,10 @@ private struct KeyView: View {
             .padding(6)
         }
         .help(tooltip)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onTap?()
+        }
         .if(interactive && keycode != nil && keycode != 0 && keycode != 1) { view in
             view.contextMenu {
                 Button("Rename label…") {
@@ -271,6 +288,13 @@ private struct KeyView: View {
         if let o = override, !o.isEmpty {
             return o
         }
+        // Prefer Mac glyphs in the Configure window — keeps the editor
+        // visually native. The overlay (useOverlayFont) sticks to QMK
+        // text labels since the user's custom font may not include ⌘/⇧/⌥
+        // glyphs.
+        if !useOverlayFont, let mac = MacKeySymbols.symbol(for: kc) {
+            return mac
+        }
         if let l = resolved, !l.tap.isEmpty {
             return l.tap
         }
@@ -319,6 +343,34 @@ private struct KeyView: View {
             special: Color(hex: "#704030"),
             text: Color.white
         )
+    }
+
+    /// Combined stroke style for the key's outline. Selection wins over
+    /// "pressed" (HID highlight) wins over the default subtle outline.
+    private var strokeStyle: AnyShapeStyle {
+        if isSelected || isPressed {
+            return AnyShapeStyle(Color.accentColor)
+        }
+        return AnyShapeStyle(Color.primary.opacity(isPlaceholderKey ? 0.18 : 0.10))
+    }
+
+    private var strokeWidth: CGFloat {
+        if isSelected { return 2.5 }
+        if isPressed { return 2 }
+        return 1
+    }
+
+    private var glowColor: Color {
+        if isSelected || isPressed {
+            return .accentColor.opacity(isSelected ? 0.7 : 0.55)
+        }
+        return .clear
+    }
+
+    private var glowRadius: CGFloat {
+        if isSelected { return 8 }
+        if isPressed { return 5 }
+        return 0
     }
 
     /// True for keys with no keycode programmed (`KC_NO`) or the

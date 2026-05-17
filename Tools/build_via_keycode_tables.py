@@ -286,6 +286,29 @@ def render(maps: dict[str, dict[str, int]]) -> str:
         lines.append("}")
         lines.append("")
 
+    # Emit unified name → keycode table. v12 is the most modern protocol,
+    # so its names take precedence; anything missing falls back through
+    # v11 → v10. The Configure window's "Custom" tab uses this to let
+    # power users type `KC_NO` / `KC_LCTL` / `RGB_TOG` directly.
+    lines.append("extension VIAKeycodeMap {")
+    lines.append("    /// Unified QMK-name → keycode lookup. Merged across v12 → v11 → v10")
+    lines.append("    /// (latest wins). Used by the Custom-tab parser; all keys are upper")
+    lines.append("    /// case so callers should normalise before lookup.")
+    lines.append("    static let nameTable: [String: UInt16] = [")
+    names_seen: set[str] = set()
+    for source in ["v12", "v11", "v10"]:
+        entries = maps[source]
+        for name, val in sorted(entries.items()):
+            if name.startswith("_"):
+                continue
+            if name in names_seen:
+                continue
+            names_seen.add(name)
+            lines.append(f'        "{name}": 0x{val:04X},')
+    lines.append("    ]")
+    lines.append("}")
+    lines.append("")
+
     # Emit ranges
     for label, entries in maps.items():
         lines.append(f"extension VIAKeycodeMap {{")
