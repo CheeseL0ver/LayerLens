@@ -18,15 +18,33 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$ROOT/dist"
 APP="$DIST/LayerLens.app"
 
-echo "==> Building release binary"
+# Build a universal binary so one .app runs on both Apple Silicon and Intel.
+ARCH_FLAGS=(--arch arm64 --arch x86_64)
+
+echo "==> Building universal release binary (arm64 + x86_64)"
 cd "$ROOT"
-swift build -c release --product LayerLens
-BIN="$ROOT/.build/release/LayerLens"
+swift build -c release --product LayerLens "${ARCH_FLAGS[@]}"
+
+# Multi-arch builds land in .build/apple/Products/Release, NOT .build/release
+# (that path is a single-triple symlink and would silently hand us a thin
+# binary). Ask SPM for the real output dir instead of hardcoding it; the
+# embedded-framework and resource-bundle globs below depend on it too.
+BIN_DIR="$(swift build -c release "${ARCH_FLAGS[@]}" --show-bin-path)"
+BIN="$BIN_DIR/LayerLens"
 
 if [[ ! -x "$BIN" ]]; then
     echo "Expected built binary at $BIN, but it's missing or non-executable." >&2
     exit 1
 fi
+
+# Fail loudly if either slice is missing (e.g. an arch flag got dropped) —
+# we'd rather break the release than ship a thin binary mislabelled universal.
+ARCHS="$(lipo -archs "$BIN")"
+if [[ "$ARCHS" != *"arm64"* || "$ARCHS" != *"x86_64"* ]]; then
+    echo "Binary at $BIN is not universal (got: $ARCHS)." >&2
+    exit 1
+fi
+echo "    Architectures: $ARCHS"
 
 echo "==> Assembling $APP"
 rm -rf "$APP"
@@ -51,7 +69,7 @@ fi
 # loader can't find them at launch and the app crashes immediately.
 mkdir -p "$APP/Contents/Frameworks"
 shopt -s nullglob
-for framework in "$ROOT/.build/release/"*.framework; do
+for framework in "$BIN_DIR/"*.framework; do
     cp -R "$framework" "$APP/Contents/Frameworks/"
     echo "    Embedded framework: $(basename "$framework")"
 done
@@ -65,7 +83,7 @@ shopt -u nullglob
 # checks Bundle.main first, so just dropping the JSON into the standard
 # Contents/Resources/ is enough and keeps the .app structure clean.
 shopt -s nullglob
-for bundle in "$ROOT/.build/release/"*.bundle; do
+for bundle in "$BIN_DIR/"*.bundle; do
     if [[ -d "$bundle" ]]; then
         cp -R "$bundle"/* "$APP/Contents/Resources/" 2>/dev/null || true
         echo "    Flattened resources from: $(basename "$bundle")"

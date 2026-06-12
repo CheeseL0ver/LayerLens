@@ -10,7 +10,7 @@
             <pubDate>Sun, 10 May 2026 00:49:47 +0000</pubDate>
             <sparkle:version>0.4.0</sparkle:version>
             <sparkle:shortVersionString>0.4.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <enclosure
                 url="https://github.com/FireBall1725/LayerLens/releases/download/v0.4.0/LayerLens-0.4.0.dmg"
                 length="2609702"

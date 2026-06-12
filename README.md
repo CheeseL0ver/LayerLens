@@ -22,9 +22,9 @@ LayerLens is a Swift rewrite of [KeyPeek](https://github.com/srwi/keypeek) (Rust
 ## Requirements
 
 **Your Mac**
-- Apple Silicon (M1 or newer)
-- macOS 14 Sonoma or later
-- ≈ 5 MB on disk
+- Apple Silicon or Intel
+- macOS 15 Sequoia or later
+- ≈ 14 MB on disk
 
 **Your keyboard**
 - QMK or Vial firmware

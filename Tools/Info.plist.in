@@ -28,7 +28,7 @@
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+    <string>15.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <!-- Menu-bar app: no Dock icon, doesn't appear in ⌘-Tab. AppDelegate also
