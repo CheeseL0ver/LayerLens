@@ -91,7 +91,7 @@
   document.querySelectorAll("[data-version-target]").forEach((el) => {
     switch (el.dataset.versionTarget) {
       case "eyebrow":
-        el.innerHTML = `v${version} &nbsp;·&nbsp; macOS 14+`;
+        el.innerHTML = `v${version} &nbsp;·&nbsp; macOS 15+`;
         break;
       case "pill":
         el.textContent = `v${version}`;

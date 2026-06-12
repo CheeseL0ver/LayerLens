@@ -4,6 +4,10 @@ import PackageDescription
 let package = Package(
     name: "LayerLensCore",
     platforms: [
+        // 15 floor: LayerLensApp uses defaultLaunchBehavior(.suppressed), a
+        // macOS 15 SwiftUI API, and SceneBuilder has no control flow to gate
+        // it with. Sequoia still runs on Intel (2018–2020+ Macs), so the
+        // universal build reaches almost the whole Intel fleet at this floor.
         .macOS(.v15)
     ],
     products: [

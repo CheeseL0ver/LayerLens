@@ -19,7 +19,7 @@ swift run LayerLensProbe  # CLI to enumerate connected QMK keyboards
 ```
 
 Requirements:
-- macOS 14+ on Apple Silicon
+- macOS 15+ (Apple Silicon or Intel)
 - Xcode 26 or newer (for the bundled Swift toolchain)
 
 ## Style

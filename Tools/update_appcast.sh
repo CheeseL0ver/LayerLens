@@ -57,7 +57,7 @@ new_item = f"""        <item>
             <pubDate>{pub_date}</pubDate>
             <sparkle:version>{version}</sparkle:version>
             <sparkle:shortVersionString>{version}</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <enclosure
                 url="{url}"
                 length="{length}"
